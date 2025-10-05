@@ -5,10 +5,13 @@ from dotenv import load_dotenv
 import numpy as np
 from google.generativeai import types
 from sklearn.metrics.pairwise import cosine_similarity
+import time
+import uuid
+from typing import List, Dict
+from redisvl.index import SearchIndex
+from redisvl.utils.vectorize import HFTextVectorizer
 
 load_dotenv()
-
-#connecting to redis 
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
@@ -21,41 +24,62 @@ redis_client = redis.Redis(
     decode_responses=False
 )
 
-#function to egenrate embeddings 
+redis_url = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}" if REDIS_PASSWORD else f"redis://{REDIS_HOST}:{REDIS_PORT}"
 
-import os
-import numpy as np
-import google.generativeai as genai
-from dotenv import load_dotenv
-from sklearn.metrics.pairwise import cosine_similarity
+## Embedder Class and object
+class Embedder:
+    def __init__(self,model = "models/text-embedding-004"):
+        self.model = model 
 
-load_dotenv()
-
-def semantic_similarity(texts):
-    genai.configure(api_key=os.getenv("GOOGLE_API_KEY")) 
-    
-    embeddings = []
-    for text in texts:
+    def embedding(self,text)->List[float]:
         result = genai.embed_content(
-            model="models/text-embedding-004", 
-            content=text,
-            task_type="retrieval_document"
+        model= self.model, 
+        content=text,
+        task_type="retrieval_document"
         )
-        embeddings.append(result['embedding'])
+        return result['embedding']
     
-    embeddings_matrix = np.array(embeddings)
-    similarity_matrix = cosine_similarity(embeddings_matrix)
-    return similarity_matrix
+index_config = {
+    "index": {
+        "name": "cesc_index",
+        "prefix": "cesc",
+        "storage_type": "hash"
+    },
+    "fields": [
+        {
+            "name": "content_vector",
+            "type": "vector",
+            "attrs": {
+                "dims": 768,
+                "distance_metric": "cosine",                  
+                "algorithm": "hnsw" 
+            }
+        },
+        {"name": "content", "type": "text"},
+        {"name": "user_id", "type": "tag"},
+        {"name": "prompt", "type": "text"},
+        {"name": "model", "type": "tag"},
+        {"name": "created_at", "type": "numeric"},
+    ]
+}
 
-texts = [
-    "What is the meaning of life?",
-    "What is the purpose of existence?",
-    "How do I bake a cake?"
-]
+search_index = SearchIndex.from_dict(index_config)
+search_index.connect(redis_url)
+search_index.create(overwrite=True)
 
-result = semantic_similarity(texts)
-print(result)
+vectorizer = Embedder() 
 
 
-# class semanticCache:
-#     def __init__(self):
+
+
+
+
+    
+
+
+
+
+
+
+
+
