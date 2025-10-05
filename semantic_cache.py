@@ -69,6 +69,67 @@ search_index.create(overwrite=True)
 
 vectorizer = Embedder() 
 
+class LLMContext:
+    def __init__(self,model):
+        self.model = genai.GenerativeModel('gemini-2.5-flash')
+
+    def llm_call_response(self,model,prompt)->Dict:
+        start_time = time.time()
+        response = self.model.generate_content(prompt)
+        latency = (time.time()-start_time)*1000
+        output = response.text
+        input_tokens = self.model.count_tokens(prompt).total_tokens
+        output_tokens = self.model.count_tokens(output).total_tokens
+
+        return {
+            "response": output,
+            "latency_ms": round(latency, 2),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "model": model
+        }
+    def build_response(self,prompt,cached_response,context):
+        context_parts = []
+        if context.get("preferences"):
+            context_parts.append("User preferences: " + ", ".join(context["preferences"]))
+        if context.get("goals"):
+            context_parts.append("User goals: " + ", ".join(context["goals"]))
+        if context.get("history"):
+            context_parts.append("User history: " + ", ".join(context["history"]))
+        context_blob = "\n".join(context_parts)
+        return f"""You are a personalization assistant. A cached response was previously generated for the prompt: "{prompt}".
+        Here is the cached response:\"\"\"{cached_response}\"\"\"Use the user's context below to personalize and refine the response:{context_blob}.
+        Respond in a way that feels tailored to this user, adjusting tone, content, or suggestions as needed. Keep your response under 3 sentences no matter what."""
+
+    def cache_hit_response(self,prompt,cached_response,context)->Dict:
+        prompt_with_context = self.build_response(prompt,cached_response,context)
+        start_time = time()
+        response = self.model.generate_content(prompt_with_context)
+        latency = (time.time()-start_time)*1000
+        output = response.text
+        input_tokens = self.model.count_tokens(prompt_with_context).total_tokens
+        output_tokens = self.model.count_tokens(output).total_tokens
+
+        return {
+            "response": output,
+            "latency_ms": round(latency, 2),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "model": self.model
+        }
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
