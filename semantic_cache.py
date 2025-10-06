@@ -8,6 +8,7 @@ import uuid
 from typing import List, Dict
 from redisvl.index import SearchIndex
 from redisvl.query import VectorQuery
+from redisvl.query.filter import Tag
 
 load_dotenv()
 
@@ -25,6 +26,7 @@ redis_client = redis.Redis(
 redis_url = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}" if REDIS_PASSWORD else f"redis://{REDIS_HOST}:{REDIS_PORT}"
 
 class Embedder:
+    #Generates 768-dimensional embeddings using Google Gemini text-embedding-004.
     def __init__(self,model = "models/text-embedding-004"):
         self.model = model 
 
@@ -68,6 +70,7 @@ vectorizer = Embedder()
 
 
 class LLMContext:
+    """Handles LLM calls to Gemini and builds personalized responses from cached content."""
     def __init__(self,model):
         self.model = genai.GenerativeModel(model)
 
@@ -117,6 +120,7 @@ class LLMContext:
         }
 
 class Telemetry:
+    #Tracks cache performance metrics: hit rate, latency, token usage, and cost.
     def __init__(self):
         self.logs = []
         self.llm_input_tokens = 0
@@ -161,6 +165,9 @@ class Telemetry:
         print(f"Latency (ms): avg={avg_latency:.2f}, min={min_latency:.2f}, max={max_latency:.2f}")
 
 class SemanticCache:
+    # Session-scoped semantic cache with personalization.
+    # Stores LLM responses in Redis with vector embeddings, retrieves similar queries,
+    # and personalizes cached responses using session context.
     def __init__(self, redis_index,model, llm_client: "LLMContext", vectorizer, telemetry:"Telemetry", cache_ttl=3600):
         self.redis_index = redis_index
         self.model = model
@@ -172,6 +179,7 @@ class SemanticCache:
         self.session_history : Dict[str,Dict] = {}
 
     def add_session_history(self,session_id,memory_type,content):
+        #Store user context (preferences, goals, history) for personalization.
         if session_id not in self.session_history:
             self.session_history[session_id] = {"preferences": [], "goals": [], "history": []}
         self.session_history[session_id][memory_type].append(content)
@@ -196,7 +204,9 @@ class SemanticCache:
     def generate_embedding(self,text):
         return self.vectorizer.embedding(text)
     
-    def search_cache(self,embedding,distance_threshold=0.2):
+    def search_cache(self,embedding,session_id,distance_threshold=0.2):
+    # Search for semantically similar cached responses within the same session.
+    # Returns cached result if cosine distance <= threshold, else None.
         return_fields = ["content", "session_id", "prompt", "model", "created_at"]
         query = VectorQuery(
             vector=embedding,
@@ -204,6 +214,7 @@ class SemanticCache:
             return_fields=return_fields,
             num_results=1,
             return_score=True,
+            filter_expression=Tag("session_id") == session_id
         )
         results = self.redis_index.query(query)
 
@@ -212,10 +223,10 @@ class SemanticCache:
             score = first.get("vector_distance", None)
             if score is not None and float(score) <= distance_threshold:
                 return {field: first[field] for field in return_fields}
-
         return None
     
     def store_response(self, prompt: str, response: str, embedding: List[float], session_id: str, model: str):
+        #Store LLM response in Redis with vector embedding and TTL expiration.
         vec_bytes = np.array(embedding, dtype=np.float32).tobytes()
 
         doc = {
@@ -237,7 +248,7 @@ class SemanticCache:
     def query(self, prompt: str,session_id: str):
         start_time = time.time()
         embedding = self.generate_embedding(prompt)
-        cached_result = self.search_cache(embedding)
+        cached_result = self.search_cache(embedding,session_id)
 
         session_context = self.get_session_history(session_id)
 
