@@ -168,7 +168,7 @@ The test file runs 6 queries across 3 different sessions to show cache behavior:
 |------|---------------|--------|
 | 1 | First query in session_1 | Cache miss (expected) |
 | 2 | Similar query in session_2 | Cache miss (different session) |
-| 3 | Add preferences to session_1 | - |
+| 3 | Add preferences to session_1 | Cache hit |
 | 4 | Similar query in session_1 | Cache hit WITH personalization |
 | 5 | Different query in session_1 | Cache miss (new content) |
 | 6 | Similar query in session_3 | Cache miss (different session) |
